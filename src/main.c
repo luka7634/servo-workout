@@ -2,92 +2,97 @@
 #include <avr/io.h>
 #include <util/delay.h>
 #include <avr/interrupt.h>
+#include <stdio.h>
 
 #include "includes/pinDefines.h"
 #include "includes/USART.h"
 
-#define PULSE_MIN 1000
-#define PULSE_MAX 2000
-#define PULSE_MID 1500
+#define PULSE_MIN 250 // 1 ms
+#define PULSE_MID 375 // 1.5 ms
+#define PULSE_MAX 500 // 2 ms
 
-static inline uint16_t getNumber16(void);
-static inline void initTimer1Servo(void);
-static inline void showOff(void);
+void initTimer1Servo();
+void showOff();
+static inline void initADC();
+uint16_t readADC(uint8_t channel);
 
-int main()
+int main(void)
 {
-    // inits
-    uint16_t servoPulseLength;
-    OCR1A = 2000; /**< set it to de mid position initially */
     initTimer1Servo();
+    OCR1A = 375;
+    initADC();
     initUSART();
-    printString("\r\nServo Demo\r\n");
+
+    printString("\r\nControl Servo con Potenciometro\r\n");
+
+    DDRB |= (1 << SERVO_OUT); // Habilita la salida del servo permanentemente
+
     showOff();
+
+    for (uint16_t i = 250; i <= 500; i++)
+    {
+        OCR1A = i;
+        _delay_ms(150);
+    }
 
     while (1)
     {
-        printString("\r\nEnter a 4-digit pulse length:\r\n");
-        servoPulseLength = getNumber16();
+        uint16_t adcValue = readADC(0);
+        uint16_t pulse = 250 + (adcValue * 250 / 1023);
 
-        printString("Give me a sec...\r\n");
-        OCR1A = servoPulseLength;
-        DDRB |= (1 << SERVO_OUT); /**< re-enable output pin */
+        OCR1A = pulse;
 
-        _delay_ms(1000);
-        printString("Releasing...\r\n");
-        while (TCNT1 < 3000)
-        {
-        }                          /**< delay until pulse part of cycle done */
-        DDRB &= ~(1 << SERVO_OUT); /**< disable output pin */
+        _delay_ms(15);
+
+        char buffer[6];
+        sprintf(buffer, "%u", adcValue);
+        printString(buffer);
+        printString("\r\n");
     }
+
+    return 0;
 }
 
-static inline uint16_t getNumber16(void) /**< Gets pwm value from serial port, reads characters and turns them into numbers */
+void initTimer1Servo()
 {
-    char thousands = '0';
-    char hundreds = '0';
-    char tens = '0';
-    char ones = '0';
-    char thisChar = '0';
-
-    do
-    {
-        thousands = hundreds; /**< shift number over */
-        hundreds = tens;
-        tens = ones;
-        ones = thisChar;
-        thisChar = receiveByte(); /**< get a new character */
-        transmitByte(thisChar);   /**< echo */
-    } while (thisChar != '\r');
-
-    transmitByte('\n');
-    return (1000 * (thousands - '0') + 100 * (hundreds - '0') + 10 * (tens - '0') + (ones - '0'));
+    DDRB |= (1 << SERVO_OUT);
+    TCCR1A |= (1 << COM1A1) | (1 << WGM11);
+    TCCR1B |= (1 << WGM13) | (1 << WGM12) | (1 << CS11) | (1 << CS10);
+    ICR1 = 4999;
 }
 
-static inline void initTimer1Servo(void)
+static inline void initADC()
 {
-    /**< set up timer1 (16bit) to give a pulse every 20ms */
-    /**< use fast pwm mode, counter max in ICR1 */
-    TCCR1A |= (1 << WGM11);
-    TCCR1B |= (1 << WGM12) | (1 << WGM13);
-    TCCR1B |= (1 << CS10);    /**< /1 prescaling -> counting in microseconds */
-    ICR1 = 20000;             /**< top value 20ms */
-    TCCR1A |= (1 << COM1A1);  /**< direct output on PB1 / OC1A */
-    DDRB |= (1 << SERVO_OUT); /**< set pin for output */
+    ADMUX |= (1 << REFS0);
+
+    ADCSRA |= (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0);
 }
 
-static inline void showOff(void)
+uint16_t readADC(uint8_t channel)
 {
-    printString("Center\r\n");
+
+    ADMUX = (ADMUX & 0xF0) | (channel & 0x0F);
+    ADCSRA |= (1 << ADSC);
+
+    while (ADCSRA & (1 << ADSC))
+        ;
+
+    return ADC;
+}
+
+uint16_t mapADCtoServo(uint16_t adc)
+{
+    return 250 + (adc * 250 / 1023);
+}
+
+void showOff()
+{
     OCR1A = PULSE_MID;
     _delay_ms(1500);
-    printString("Clockwise Max\r\n");
-    OCR1A = PULSE_MIN;
-    _delay_ms(1500);
-    printString("Counterclockwise Max\r\n");
     OCR1A = PULSE_MAX;
     _delay_ms(1500);
-    printString("Center\r\n");
+    OCR1A = PULSE_MIN;
+    _delay_ms(1500);
     OCR1A = PULSE_MID;
     _delay_ms(1500);
 }
