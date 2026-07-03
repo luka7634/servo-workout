@@ -25,7 +25,7 @@ int main(void)
 
     printString("\r\nControl Servo con Potenciometro\r\n");
 
-    DDRB |= (1 << SERVO_OUT); // Habilita la salida del servo permanentemente
+    DDRB |= (1 << SERVO_OUT);
 
     showOff();
 
